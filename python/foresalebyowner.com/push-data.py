@@ -1,8 +1,6 @@
-# This is a very quick and dirty data extract from one web site and using api_tools/py for pushing data
-# This is not an example of great code, but a first step in demonstrating how we start doing
-# data pushes.
 
-from api_tools import push_data
+from python.api_tools import push_data
+from python.userconfig import DEVUSER, DEVPASS, DEVURL, LOCALUSER, LOCALPASS, LOCALURL
 import requests
 import bs4 as bsoup
 import pandas as pd
@@ -13,11 +11,14 @@ import json
 
 def extract_listings(txt):
     plistings = []
-    s = bsoup.BeautifulSoup(txt)
+    s = bsoup.BeautifulSoup(txt, 'lxml')
     listings = s.findAll('div', {'class': 'estate-info'})
     for listing in listings:
         price = listing.find('div', {'class': 'estateSummary-price mix-estateSummary_SM-price_sm'}).text
-        title = listing.find('div', {'class': 'estateSummary-title mix-estateSummary_SM-title_sm'}).text
+        try:
+            title = listing.find('div', {'class': 'estateSummary-title mix-estateSummary_SM-title_sm'}).text
+        except:
+            pass
         address = listing.find('div', {'class': 'estateSummary-address'}).text
         elems = listing.findAll('div', {'class': 'estateSummary-list'})
         beds = 0
@@ -45,23 +46,35 @@ def extract_listings(txt):
         plistings.append(plisting)
     return plistings
 
-pnum = 1
-test = -1
+pnum = 0
+morepages = True
 plistings = []
-while test == -1:
-    r = requests.get('http://www.forsalebyowner.com/search/list/los-angeles-california/house,condo-types/' + str(pnum) + '-page/proximity,desc-sort')
-    time.sleep(.5)
-    test = r.text.find('Your search did not yield any results.')
-    if test == -1:
-        plistings.extend(extract_listings(r.text))
+
+print('starting connection')
+while morepages:
     pnum += 1
+    r = requests.get('http://www.forsalebyowner.com/search/list/80403/house,condo-types/' + str(pnum) + '-page/proximity,desc-sort')
+    #r = requests.get('http://www.forsalebyowner.com/search/list/80403/house,condo,townhouse-types/1-page/proximity,desc-sort')
+    time.sleep(.5)
+    morepages = 'Your search did not yield any results.' not in r.text
+    print('At page: {}'.format(pnum))
+    if morepages:
+        try:
+            plistings.extend(extract_listings(r.text))
+            print('Got page: {}'.format(pnum))
+        except Exception as e:
+            raise e
+            print('Failed page: {}'.format(pnum))
+            continue
+
 
 df = pd.DataFrame(plistings)
 
 # Create an instance of the data pusher.
 # Testing locally here, you need an account to push to:
 # http://home-sales-data-api-dev.herokuapp.com    or    http://http://home-sales-data-api.herokuapp.com
-pusher = push_data(username='JohnDoe', password='SuperSecure', baseurl='http://127.0.0.1:8000', geocode='address')
+print('Get Token')
+pusher = push_data(username=LOCALUSER, password=LOCALPASS, baseurl=LOCALURL, geocode='address')
 pusher.get_token()
 print('API token: {}'.format(pusher.token))
 
@@ -94,6 +107,13 @@ for r in range(df.shape[0]):
     try:
         p = pusher.post_data(data=request)
         time.sleep(0.1)
-    except:
-        print('Failed: {}'.format(raw_address))
-        time.sleep(0.1)
+    except: # did not get a valid raw address, lets not record this.
+        # if  "address" in str(e): # "'NoneType' object has no attribute 'address'"
+        #     continue
+        # else:
+        #     print('####')
+        #     raise\
+        continue
+
+
+
